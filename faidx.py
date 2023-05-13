@@ -34,18 +34,34 @@ def main(argc, argv):
 
     name = ""
     fpos = foffset = readlen = linelen = 0
+    expect_name = False
 
-    for line in fasta_handler.readlines():
+    for linenum, line in enumerate(fasta_handler.readlines()):
         assert line[-1] == "\n"
+        if expect_name and line[0] != ">":
+            sys.stderr.write("Format error: unexpected \"{}\" at line {}\n".format(line[0], linenum+1))
+            sys.stderr.flush()
+            faidx_handler.close()
+            faidx_path.unlink()
+            sys.exit(-1)
         if line[0] == ">":
             if readlen > 0:
                 faidx_handler.write("{}\t{}\t{}\t{}\t{}\n".format(name, readlen, fpos, linelen-1, linelen))
                 readlen = 0
             name = line.lstrip(">").split()[0].rstrip()
+            expect_name = False
         else:
             if readlen == 0:
                 fpos = foffset
                 linelen = len(line)
+            elif len(line) > linelen:
+                sys.stderr.write("Format error: different line length in sequence '{}' at line {}\n".format(name, linenum+1))
+                sys.stderr.flush()
+                faidx_handler.close()
+                faidx_path.unlink()
+                sys.exit(-1)
+            elif len(line) < linelen:
+                expect_name = True
             readlen += len(line)-1
         foffset += len(line)
 
