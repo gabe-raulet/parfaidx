@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <string>
 #include <filesystem>
@@ -46,7 +47,76 @@ int main(int argc, char *argv[])
     std::string fasta_pathname, faidx_pathname;
     get_file_paths(argv[1], fasta_pathname, faidx_pathname);
 
-    std::cout << std::quoted(fasta_pathname) << "\n" << std::quoted(faidx_pathname) << std::endl;
+    std::ifstream fasta_stream(fasta_pathname);
+    std::ofstream faidx_stream(faidx_pathname);
+
+    std::string name, line;
+    size_t fpos, foffset, readlen, linelen;
+    bool expect_name;
+
+    fpos = foffset = readlen = linelen = 0;
+    expect_name = false;
+
+    size_t linenum = 0;
+
+    while (std::getline(fasta_stream, line))
+    {
+        line += "\n";
+        linenum++;
+
+        if (expect_name && line[0] != '>')
+        {
+            std::cerr << "Format error: unexpected " << std::quoted(std::string(1, line[0])) << " at line " << linenum << std::endl;
+            fasta_stream.close();
+            faidx_stream.close();
+            fs::path p = faidx_pathname;
+            fs::remove(p);
+            exit(-1);
+        }
+
+        if (line[0] == '>')
+        {
+            if (readlen > 0)
+            {
+                faidx_stream << name << "\t" << readlen << "\t" << fpos << "\t" << linelen-1 << "\t" << linelen << "\n";
+                readlen = 0;
+            }
+
+            name = line.substr(1, line.find_first_of(" \t\n\r\v", 1) - 1);
+            expect_name = false;
+        }
+        else
+        {
+            if (readlen == 0)
+            {
+                fpos = foffset;
+                linelen = line.size();
+            }
+            else if (line.size() > linelen)
+            {
+                std::cerr << "Format error: different line length in sequence " << std::quoted(name) << " at line " << linenum << std::endl;
+                fasta_stream.close();
+                faidx_stream.close();
+                fs::path p = faidx_pathname;
+                fs::remove(p);
+                exit(-1);
+            }
+            else if (line.size() < linelen)
+            {
+                expect_name = true;
+            }
+            readlen += line.size()-1;
+        }
+        foffset += line.size();
+    }
+
+    if (readlen > 0)
+    {
+        faidx_stream << name << "\t" << readlen << "\t" << fpos << "\t" << linelen-1 << "\t" << linelen << "\n";
+    }
+
+    fasta_stream.close();
+    faidx_stream.close();
 
     return 0;
 }
